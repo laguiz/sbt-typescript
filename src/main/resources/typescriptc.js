@@ -161,9 +161,49 @@
         var opt = args.options;
         opt.rootDir = rootDir;
         opt.outDir = args.target;
+
+        // Typescript options that will be used by the Typescript compiler (it will be populated with tsconfig.json if exist and with sbt options)
+        var options = undefined;
+
         //compilationResult contains the compiled source and the dependencies
-        var options = createCompilerSettings(opt);
-        logger.debug("options = " + JSON.stringify(options));
+        var optionsFromSbt = createCompilerSettings(opt);
+        logger.debug("options from sbt = " + JSON.stringify(optionsFromSbt));
+
+        // Test if tsconfig.json exist
+        var configFilePath = "tsconfig.json";
+        var tsconfigFileExist = false;
+        try {
+            // Try/Catch based on feedback here http://stackoverflow.com/questions/4482686/check-synchronously-if-file-directory-exists-in-node-js
+            var tsconfigFileStat = fs.lstatSync(configFilePath);
+            tsconfigFileExist = tsconfigFileStat.isFile();
+        } catch (e) {
+            if(e.code == "ENOENT"){
+                logger.debug("File `tsconfig.json` not found in root folder so we skip it.");
+            }else{
+                logger.warn(JSON.stringify(e));
+            }
+        }
+
+        //If tsconfig.json exist then we use it otherwise we just use sbt options as is
+        if(tsconfigFileExist){
+            // If tsconfig file exist then we read the file and parse it (with methods from typescript object)
+            var resultConfigFile = typescript.readConfigFile(configFilePath);
+            var configObject = resultConfigFile.config;
+            var configParseResult = typescript.parseConfigFile(configObject, typescript.sys, typescript.getDirectoryPath(configFilePath));
+            logger.debug("options from tsconfig.json = " + JSON.stringify(configParseResult.options));
+
+            // Options in tsconfig.json takes priority over sbt configuration (sounds logic for me)
+            // It means :
+            // - Init with `configParseResult.options`
+            // - Then for each property in `optionsFromSbt` copy in final options only if it does NOT exist in tsconfig.json
+            options = typescript.extend(configParseResult.options, optionsFromSbt);
+        }else{
+            // If there is no file `tsconfig.json` present in the root folder of the project then we just ignore it and simply use options from sbt
+            options = optionsFromSbt;
+        }
+
+        logger.debug("options final (merged) = " + JSON.stringify(options));
+
         var compilerHost = typescript.createCompilerHost(options);
         var program = typescript.createProgram(inputFiles, options, compilerHost);
 
